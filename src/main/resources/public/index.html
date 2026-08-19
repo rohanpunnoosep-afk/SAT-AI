@@ -7,11 +7,64 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="shell">
+  <div id="error-banner" class="error-banner" hidden></div>
+
+  <header class="app-header">
     <h1>SAT Tutoring</h1>
-    <p class="sub">Web UI placeholder — served from <code>src/main/resources/public</code>.</p>
-    <div id="app"></div>
+    <p class="sub">Practice questions with instant grading and AI-generated variants.</p>
+  </header>
+
+  <main class="layout">
+    <section class="panel filter-panel" aria-label="Filters">
+      <h2>Filters</h2>
+      <label for="filter-section">Section</label>
+      <select id="filter-section"><option value="">Any</option></select>
+
+      <label for="filter-domain">Domain</label>
+      <select id="filter-domain"><option value="">Any</option></select>
+
+      <label for="filter-skill">Skill</label>
+      <select id="filter-skill"><option value="">Any</option></select>
+
+      <label for="filter-difficulty">Difficulty</label>
+      <select id="filter-difficulty"><option value="">Any</option></select>
+
+      <label for="filter-search">Search</label>
+      <input type="text" id="filter-search" placeholder="Search stem text...">
+
+      <button id="apply-filters" type="button">Apply filters</button>
+    </section>
+
+    <section class="panel main-panel" aria-label="Questions">
+      <div class="list-header">
+        <h2>Questions</h2>
+        <span id="result-count" class="result-count"></span>
+      </div>
+      <ul id="question-list" class="question-list"></ul>
+
+      <div id="question-detail" class="question-detail" hidden>
+        <div id="question-stimulus" class="stimulus"></div>
+        <div id="question-stem" class="stem"></div>
+        <div id="question-answer-form" class="answer-form"></div>
+
+        <div class="detail-controls">
+          <button id="submit-answer" type="button">Submit</button>
+          <button id="show-answer" type="button">Show answer</button>
+          <button id="generate-similar" type="button">Generate similar question</button>
+        </div>
+
+        <div id="submit-result" class="submit-result"></div>
+        <div id="answer-area" class="answer-area"></div>
+      </div>
+    </section>
+
+    <aside class="panel sidebar" aria-label="Review list">
+      <h2>Weak topics</h2>
+      <div id="session-stats" class="session-stats"></div>
+      <ul id="review-list" class="review-list"></ul>
+    </aside>
   </main>
+
   <script src="app.js"></script>
 </body>
 </html>
