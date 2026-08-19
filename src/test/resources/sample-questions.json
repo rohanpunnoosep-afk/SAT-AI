@@ -1,0 +1,58 @@
+{
+  "aaaa1111-0000-4000-8000-000000000001": {
+    "uId": "aaaa1111-0000-4000-8000-000000000001",
+    "questionId": "samp001",
+    "module": "math",
+    "difficulty": "E",
+    "primary_class_cd_desc": "Algebra",
+    "skill_desc": "Linear equations in one variable",
+    "content": {
+      "stem": "<p>Solve for <math><mi>x</mi></math>: <math><mn>2</mn><mi>x</mi><mo>+</mo><mn>3</mn><mo>=</mo><mn>11</mn></math></p>",
+      "type": "mcq",
+      "answerOptions": [
+        {"id": "A", "content": "<p>2</p>"},
+        {"id": "B", "content": "<p>3</p>"},
+        {"id": "C", "content": "<p>4</p>"},
+        {"id": "D", "content": "<p>5</p>"}
+      ],
+      "correct_answer": ["C"],
+      "rationale": "<p>Subtract 3 from both sides to get 2x = 8, then divide by 2 to get x = 4.</p>"
+    }
+  },
+  "bbbb2222-0000-4000-8000-000000000002": {
+    "uId": "bbbb2222-0000-4000-8000-000000000002",
+    "questionId": "samp002",
+    "module": "math",
+    "difficulty": "H",
+    "primary_class_cd_desc": "Advanced Math",
+    "skill_desc": "Nonlinear equations",
+    "content": {
+      "stimulus": "<p>A rectangular garden has a perimeter of 40 feet.</p>",
+      "stem": "<p>If the length is 1.764 times the width, what is the width, as a fraction, rounded to the nearest thousandth?</p>",
+      "type": "spr",
+      "keys": [".1764", " 3/17"],
+      "rationale": "<p>Set up the perimeter equation and solve for the width in terms of the given ratio.</p>"
+    }
+  },
+  "cccc3333-0000-4000-8000-000000000003": {
+    "uId": "cccc3333-0000-4000-8000-000000000003",
+    "questionId": "samp003",
+    "module": "english",
+    "difficulty": "M",
+    "primary_class_cd_desc": "Craft and Structure",
+    "skill_desc": "Words in context",
+    "content": {
+      "stimulus": "<p>The committee's decision was met with widespread ______, as many members felt their concerns had been ignored during the deliberation process.</p>",
+      "stem": "<p>Which choice completes the text with the most logical and precise word or phrase?</p>",
+      "type": "mcq",
+      "answerOptions": [
+        {"id": "A", "content": "<p>enthusiasm</p>"},
+        {"id": "B", "content": "<p>consternation</p>"},
+        {"id": "C", "content": "<p>indifference</p>"},
+        {"id": "D", "content": "<p>curiosity</p>"}
+      ],
+      "correct_answer": ["B"],
+      "rationale": "<p>\"Consternation\" best captures the sense of concern and displeasure implied by \"ignored during the deliberation process.\"</p>"
+    }
+  }
+}
