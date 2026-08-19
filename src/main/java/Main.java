@@ -9,6 +9,7 @@ public class Main
         System.out.println("===== SAT TUTORING =====");
         System.out.println("Choose command:");
         System.out.println("help");
+        System.out.println("serve");
         System.out.println("exit");
         System.out.println();
         System.out.print("Enter command: ");
@@ -32,6 +33,26 @@ public class Main
         else if (prompt0.equalsIgnoreCase("exit") || prompt0.equals("2"))
         {
             System.out.println("Goodbye.");
+        }
+
+        // ============================================================
+        // 3. SERVE (web app)
+        // ============================================================
+
+        else if (prompt0.equalsIgnoreCase("serve") || prompt0.equals("3"))
+        {
+            String dbPath = satapp.db.Database.resolveDbPath();
+            int port = satapp.web.WebServer.resolvePort();
+            System.out.println("Using database: " + dbPath);
+            System.out.println("Starting web server on http://localhost:" + port);
+
+            io.javalin.Javalin app = satapp.web.WebServer.start(dbPath, port);
+
+            System.out.println("Server is running. Press Enter to stop.");
+            scanner0.nextLine();
+
+            app.stop();
+            System.out.println("Server stopped.");
         }
 
         else
