@@ -1,16 +1,23 @@
 package satapp.web;
 
 import io.javalin.Javalin;
+import io.javalin.http.Context;
+import io.javalin.http.Cookie;
 import io.javalin.http.staticfiles.Location;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import satapp.db.Database;
 import satapp.db.QuestionRepository;
 import satapp.model.Question;
+import satapp.model.TopicStat;
+import satapp.session.AnswerGrader;
+import satapp.session.SessionState;
+import satapp.session.SessionStore;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.UUID;
 
 public class WebServer {
 
@@ -30,6 +37,7 @@ public class WebServer {
         Connection conn = Database.open(dbPath);
         Database.initSchema(conn);
         QuestionRepository repo = new QuestionRepository(conn);
+        SessionStore sessionStore = new SessionStore();
 
         Javalin app = Javalin.create(config -> {
             config.staticFiles.add("/public", Location.CLASSPATH);
@@ -125,8 +133,106 @@ public class WebServer {
             ctx.result(obj.toString());
         });
 
+        // ---- Session tracking (in-memory, per-browser, disposable) ----
+
+        app.post("/api/session/answer", ctx -> {
+            SessionState session = resolveSession(ctx, sessionStore);
+            JSONObject body;
+            try {
+                body = new JSONObject(ctx.body());
+            } catch (Exception e) {
+                ctx.status(400);
+                ctx.contentType("application/json");
+                ctx.result(new JSONObject().put("error", "invalid request body").toString());
+                return;
+            }
+            String questionId = body.optString("questionId", null);
+            String submitted = body.has("submitted") ? body.optString("submitted", null)
+                    : body.optString("selectedChoice", null);
+
+            ctx.contentType("application/json");
+            if (questionId == null || questionId.trim().isEmpty()) {
+                ctx.status(400);
+                ctx.result(new JSONObject().put("error", "questionId is required").toString());
+                return;
+            }
+            if (submitted == null || submitted.trim().isEmpty()) {
+                ctx.status(400);
+                ctx.result(new JSONObject().put("error", "submitted is required").toString());
+                return;
+            }
+
+            Question q = repo.findById(questionId);
+            if (q == null) {
+                ctx.status(404);
+                ctx.result(new JSONObject().put("error", "not found").toString());
+                return;
+            }
+
+            boolean correct = AnswerGrader.isCorrect(q, submitted);
+            session.record(q, submitted, correct);
+
+            JSONObject resp = new JSONObject();
+            resp.put("correct", correct);
+            resp.put("questionId", questionId);
+            ctx.result(resp.toString());
+        });
+
+        app.get("/api/session/review-list", ctx -> {
+            SessionState session = resolveSession(ctx, sessionStore);
+            JSONArray arr = new JSONArray();
+            for (TopicStat stat : session.reviewList()) {
+                arr.put(topicStatJson(stat));
+            }
+            ctx.contentType("application/json");
+            ctx.result(new JSONObject().put("topics", arr).toString());
+        });
+
+        app.get("/api/session/stats", ctx -> {
+            SessionState session = resolveSession(ctx, sessionStore);
+            int answered = session.getAnsweredQuestions().size();
+            int correct = 0;
+            for (SessionState.AnswerRecord record : session.getAnsweredQuestions().values()) {
+                if (record.correct) {
+                    correct++;
+                }
+            }
+            JSONArray arr = new JSONArray();
+            for (TopicStat stat : session.allTopics()) {
+                arr.put(topicStatJson(stat));
+            }
+            JSONObject resp = new JSONObject();
+            resp.put("answered", answered);
+            resp.put("correct", correct);
+            resp.put("topics", arr);
+            ctx.contentType("application/json");
+            ctx.result(resp.toString());
+        });
+
         app.start(port);
         return app;
+    }
+
+    private static JSONObject topicStatJson(TopicStat stat) {
+        JSONObject obj = new JSONObject();
+        obj.put("domain", stat.getDomain());
+        obj.put("skill", stat.getSkill());
+        obj.put("attempts", stat.getAttempts());
+        obj.put("correct", stat.getCorrect());
+        obj.put("accuracy", stat.accuracy());
+        return obj;
+    }
+
+    private static SessionState resolveSession(Context ctx, SessionStore sessionStore) {
+        String sessionId = ctx.cookie(SessionStore.COOKIE);
+        if (sessionId == null || sessionId.trim().isEmpty()) {
+            sessionId = UUID.randomUUID().toString();
+            Cookie cookie = new Cookie(SessionStore.COOKIE, sessionId);
+            cookie.setPath("/");
+            cookie.setHttpOnly(true);
+            ctx.cookie(cookie);
+        }
+        return sessionStore.get(sessionId);
     }
 
     public static void main(String[] args) throws SQLException {
