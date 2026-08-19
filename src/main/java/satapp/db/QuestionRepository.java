@@ -63,6 +63,38 @@ public class QuestionRepository {
         return results;
     }
 
+    public void insert(Question q) throws SQLException {
+        String sql = "INSERT INTO questions " +
+            "(id, external_id, section, domain, skill, difficulty, question_type, stimulus, stem, " +
+            "choices_json, correct_answer, explanation, source, parent_question_id) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, q.getId());
+            setNullableString(ps, 2, q.getExternalId());
+            setNullableString(ps, 3, q.getSection());
+            setNullableString(ps, 4, q.getDomain());
+            setNullableString(ps, 5, q.getSkill());
+            setNullableString(ps, 6, q.getDifficulty());
+            setNullableString(ps, 7, q.getQuestionType());
+            setNullableString(ps, 8, q.getStimulus());
+            setNullableString(ps, 9, q.getStem());
+            setNullableString(ps, 10, q.getChoicesJson());
+            setNullableString(ps, 11, q.getCorrectAnswer());
+            setNullableString(ps, 12, q.getExplanation());
+            setNullableString(ps, 13, q.getSource());
+            setNullableString(ps, 14, q.getParentQuestionId());
+            ps.executeUpdate();
+        }
+    }
+
+    private static void setNullableString(PreparedStatement ps, int index, String value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, java.sql.Types.VARCHAR);
+        } else {
+            ps.setString(index, value);
+        }
+    }
+
     public Question findById(String id) throws SQLException {
         String sql = "SELECT * FROM questions WHERE id = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {

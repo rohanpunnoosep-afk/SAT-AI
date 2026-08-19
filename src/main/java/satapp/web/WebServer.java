@@ -6,6 +6,8 @@ import io.javalin.http.Cookie;
 import io.javalin.http.staticfiles.Location;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import satapp.ai.GenerationException;
+import satapp.ai.OpenAiClient;
 import satapp.db.Database;
 import satapp.db.QuestionRepository;
 import satapp.model.Question;
@@ -120,6 +122,69 @@ public class WebServer {
             obj.put("id", q.getId());
             obj.put("correct_answer", q.getCorrectAnswer());
             obj.put("explanation", q.getExplanation());
+            ctx.result(obj.toString());
+        });
+
+        // ---- AI question generation ----
+
+        app.post("/api/questions/{id}/generate", ctx -> {
+            String id = ctx.pathParam("id");
+            ctx.contentType("application/json");
+
+            Question seed = repo.findById(id);
+            if (seed == null) {
+                ctx.status(404);
+                ctx.result(new JSONObject().put("error", "not found").toString());
+                return;
+            }
+
+            if (!OpenAiClient.isConfigured()) {
+                ctx.status(503);
+                ctx.result(new JSONObject()
+                    .put("error", "AI generation unavailable: OPENAI_API_KEY is not set").toString());
+                return;
+            }
+
+            JSONObject generated;
+            try {
+                generated = OpenAiClient.generate(seed);
+            } catch (GenerationException e) {
+                ctx.status(502);
+                ctx.result(new JSONObject().put("error", e.getMessage()).toString());
+                return;
+            }
+
+            Question newQuestion = new Question();
+            newQuestion.setId("ai-" + UUID.randomUUID());
+            newQuestion.setExternalId(null);
+            newQuestion.setSection(seed.getSection());
+            newQuestion.setDomain(seed.getDomain());
+            newQuestion.setSkill(seed.getSkill());
+            newQuestion.setDifficulty(seed.getDifficulty());
+            newQuestion.setQuestionType("mcq");
+            newQuestion.setStimulus(null);
+            newQuestion.setStem(generated.getString("stem"));
+            newQuestion.setChoicesJson(generated.getJSONArray("choices").toString());
+            newQuestion.setCorrectAnswer(generated.getString("correct_answer"));
+            newQuestion.setExplanation(generated.getString("explanation"));
+            newQuestion.setSource("ai_generated");
+            newQuestion.setParentQuestionId(seed.getId());
+
+            repo.insert(newQuestion);
+
+            JSONObject obj = new JSONObject();
+            obj.put("id", newQuestion.getId());
+            obj.put("section", newQuestion.getSection());
+            obj.put("domain", newQuestion.getDomain());
+            obj.put("skill", newQuestion.getSkill());
+            obj.put("difficulty", newQuestion.getDifficulty());
+            obj.put("question_type", newQuestion.getQuestionType());
+            obj.put("stimulus", newQuestion.getStimulus());
+            obj.put("stem", newQuestion.getStem());
+            obj.put("choices", new JSONArray(newQuestion.getChoicesJson()));
+            obj.put("source", newQuestion.getSource());
+            obj.put("parent_question_id", newQuestion.getParentQuestionId());
+            ctx.status(201);
             ctx.result(obj.toString());
         });
 
