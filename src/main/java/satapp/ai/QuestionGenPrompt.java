@@ -43,18 +43,24 @@ public class QuestionGenPrompt {
               .append("student would solve with the identical sequence of steps.\n\n");
         }
 
+        sb.append("Solve your own question completely in the \"work\" field BEFORE choosing ")
+          .append("\"correct_answer\". \"correct_answer\" must be the id of the choice whose text ")
+          .append("equals the result of your work. Every choice text must be distinct, and the ")
+          .append("distractors must be wrong.\n\n");
         sb.append("Reply with strict JSON only, no markdown code fence, no prose before or after, ")
           .append("in exactly this shape:\n");
         sb.append("{\"stem\": \"...\", \"choices\": [{\"id\":\"A\",\"text\":\"...\"}, ")
-          .append("{\"id\":\"B\",\"text\":\"...\"}, ...], \"correct_answer\": \"B\", \"explanation\": \"...\"}\n");
+          .append("{\"id\":\"B\",\"text\":\"...\"}, ...], \"work\": \"...\", \"correct_answer\": \"B\", ")
+          .append("\"explanation\": \"...\"}\n");
 
         if (stricterRetry) {
             sb.append("\nIMPORTANT: your previous reply was invalid. The entire reply MUST be a ")
               .append("single JSON object with exactly these keys: \"stem\" (non-blank string), ")
               .append("\"choices\" (array of at least 2 objects each with non-blank \"id\" and ")
-              .append("\"text\", with unique ids), \"correct_answer\" (must match one choice id, ")
-              .append("case-insensitively), and \"explanation\" (non-blank string). Do not include ")
-              .append("any markdown fence or any text outside the JSON object.\n");
+              .append("\"text\", with unique ids), \"work\" (non-blank string showing your full ")
+              .append("solution before you commit to an answer), \"correct_answer\" (must match one ")
+              .append("choice id, case-insensitively), and \"explanation\" (non-blank string). Do not ")
+              .append("include any markdown fence or any text outside the JSON object.\n");
         }
 
         return sb.toString();
