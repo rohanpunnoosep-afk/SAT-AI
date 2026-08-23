@@ -10,11 +10,16 @@
   <div id="error-banner" class="error-banner" hidden></div>
 
   <header class="app-header">
-    <h1>SAT Tutoring</h1>
-    <p class="sub">Practice questions with instant grading and AI-generated variants.</p>
+    <div class="app-header-row">
+      <div>
+        <h1>SAT Tutoring</h1>
+        <p class="sub">Practice questions with instant grading and AI-generated variants.</p>
+      </div>
+      <button id="open-boxes" type="button">My Boxes</button>
+    </div>
   </header>
 
-  <main class="layout">
+  <main class="layout" id="layout">
     <section class="panel filter-panel" aria-label="Filters">
       <h2>Filters</h2>
       <label for="filter-section">Section</label>
@@ -35,27 +40,59 @@
       <button id="apply-filters" type="button">Apply filters</button>
     </section>
 
-    <section class="panel main-panel" aria-label="Questions">
+    <section class="panel questions-panel" aria-label="Questions">
       <div class="list-header">
-        <h2>Questions</h2>
+        <h2 id="questions-title">Questions</h2>
         <span id="result-count" class="result-count"></span>
       </div>
-      <ul id="question-list" class="question-list"></ul>
 
-      <div id="question-detail" class="question-detail" hidden>
-        <div id="question-stimulus" class="stimulus"></div>
-        <div id="question-stem" class="stem"></div>
-        <div id="question-answer-form" class="answer-form"></div>
-
-        <div class="detail-controls">
-          <button id="submit-answer" type="button">Submit</button>
-          <button id="show-answer" type="button">Show answer</button>
-          <button id="generate-similar" type="button">Generate similar question</button>
+      <!-- Shown only while a box is open; the box's questions take over the list below. -->
+      <div id="box-mode-bar" class="box-mode-bar" hidden>
+        <button id="exit-box" type="button" class="link-button">&larr; All questions</button>
+        <div class="box-generate-row" id="box-generate-row">
+          <label>Count
+            <input type="number" id="box-gen-count" min="1" max="20" value="3">
+          </label>
+          <label>Level
+            <select id="box-gen-level">
+              <option value="1">Level 1 — same procedure</option>
+              <option value="2">Level 2 — same technique</option>
+            </select>
+          </label>
+          <button id="box-generate-btn" type="button">Generate similar questions</button>
         </div>
-
-        <div id="submit-result" class="submit-result"></div>
-        <div id="answer-area" class="answer-area"></div>
+        <div id="box-generate-status" class="box-generate-status"></div>
       </div>
+
+      <ul id="question-list" class="question-list"></ul>
+    </section>
+
+    <section id="question-detail" class="panel detail-panel" aria-label="Question" hidden>
+      <div class="detail-header">
+        <div id="question-cb-id" class="cb-id-detail" hidden></div>
+        <button id="close-question" class="close-question" type="button"
+                title="Close question" aria-label="Close question">&times;</button>
+      </div>
+      <div id="question-stimulus" class="stimulus"></div>
+      <div id="question-stem" class="stem"></div>
+      <div id="question-answer-form" class="answer-form"></div>
+
+      <div class="detail-controls">
+        <button id="show-answer" type="button">Show answer</button>
+        <span id="gen-level-group" class="gen-level-group" role="radiogroup"
+              aria-label="Similarity level" hidden>
+          <label><input type="radio" name="gen-level" value="1" checked> Level 1 — same procedure</label>
+          <label><input type="radio" name="gen-level" value="2"> Level 2 — same technique</label>
+        </span>
+        <button id="generate-similar" type="button">Generate similar question</button>
+        <span class="add-to-box-wrap">
+          <button id="add-to-box" type="button">Add to box</button>
+          <div id="add-to-box-menu" class="add-to-box-menu" hidden></div>
+        </span>
+      </div>
+
+      <div id="submit-result" class="submit-result"></div>
+      <div id="answer-area" class="answer-area"></div>
     </section>
 
     <aside class="panel sidebar" aria-label="Review list">
@@ -64,6 +101,24 @@
       <ul id="review-list" class="review-list"></ul>
     </aside>
   </main>
+
+  <div id="boxes-overlay" class="boxes-overlay" hidden>
+    <section class="panel boxes-panel" aria-label="Boxes">
+      <div class="boxes-header">
+        <h2>My Boxes</h2>
+        <button id="close-boxes" class="close-question" type="button"
+                title="Close boxes" aria-label="Close boxes">&times;</button>
+      </div>
+      <div class="boxes-body">
+        <p class="boxes-hint">Open a box to work through its questions in the question list.</p>
+        <ul id="boxes-list" class="review-list"></ul>
+        <div class="new-box-row">
+          <input type="text" id="new-box-label" placeholder="New box name">
+          <button id="create-box" type="button">Create box</button>
+        </div>
+      </div>
+    </section>
+  </div>
 
   <script src="app.js"></script>
 </body>

@@ -16,14 +16,15 @@ import java.sql.Types;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 public class ImportQuestions {
 
     private static final String INSERT_SQL =
         "INSERT OR REPLACE INTO questions " +
-        "(id, external_id, section, domain, skill, difficulty, question_type, stimulus, stem, " +
+        "(id, external_id, cb_question_id, section, domain, skill, difficulty, question_type, stimulus, stem, " +
         "choices_json, correct_answer, explanation, source, parent_question_id) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
@@ -50,6 +51,17 @@ public class ImportQuestions {
                     JSONObject entry = root.getJSONObject(uId);
                     JSONObject content = entry.optJSONObject("content");
 
+                    // Older bank entries use a different shape (prompt / answer.choices
+                    // instead of stem / answerOptions); fold them into the standard shape.
+                    if (content != null && !content.has("stem") && content.has("prompt")) {
+                        content = normalizeLegacy(content);
+                        if (content == null) {
+                            System.err.println("SKIP " + uId + ": legacy entry has no gradeable answer");
+                            skipped++;
+                            continue;
+                        }
+                    }
+
                     String stem = content != null ? content.optString("stem", null) : null;
                     if (stem == null) {
                         System.err.println("SKIP " + uId + ": missing content.stem");
@@ -64,6 +76,11 @@ public class ImportQuestions {
                         skipped++;
                         continue;
                     }
+
+                    // The College Board question ID -- the short id shown in the
+                    // official Question Bank UI, which students quote when asking
+                    // about a specific question.
+                    String cbQuestionId = trimToNull(entry.optString("questionId", null));
 
                     String module = entry.optString("module", null);
                     String section = "math".equals(module) ? "Math"
@@ -86,18 +103,19 @@ public class ImportQuestions {
 
                     ps.setString(1, uId);
                     ps.setString(2, uId);
-                    ps.setString(3, section);
-                    ps.setString(4, domain);
-                    ps.setString(5, skill);
-                    ps.setString(6, difficulty);
-                    ps.setString(7, type);
-                    setNullableString(ps, 8, stimulus);
-                    ps.setString(9, stem);
-                    setNullableString(ps, 10, choicesJson);
-                    ps.setString(11, correctAnswer);
-                    setNullableString(ps, 12, explanation);
-                    ps.setString(13, "official");
-                    ps.setNull(14, Types.VARCHAR);
+                    setNullableString(ps, 3, cbQuestionId);
+                    ps.setString(4, section);
+                    ps.setString(5, domain);
+                    ps.setString(6, skill);
+                    ps.setString(7, difficulty);
+                    ps.setString(8, type);
+                    setNullableString(ps, 9, stimulus);
+                    ps.setString(10, stem);
+                    setNullableString(ps, 11, choicesJson);
+                    ps.setString(12, correctAnswer);
+                    setNullableString(ps, 13, explanation);
+                    ps.setString(14, "official");
+                    ps.setNull(15, Types.VARCHAR);
 
                     ps.addBatch();
                     imported++;
@@ -128,12 +146,98 @@ public class ImportQuestions {
             }
             return sb.toString();
         } else {
-            JSONArray correct = content.optJSONArray("correct_answer");
-            if (correct == null || correct.length() == 0) {
-                return null;
-            }
-            return correct.getString(0);
+            return resolveMcqChoiceId(content);
         }
+    }
+
+    /**
+     * The UI submits the answerOption id, so the stored answer must be that id.
+     * The bank identifies the correct choice three different ways: content.keys
+     * holds the option id, content.correct_answer sometimes holds that same id,
+     * and sometimes holds a letter that indexes into answerOptions.
+     */
+    private static String resolveMcqChoiceId(JSONObject content) {
+        JSONArray options = content.optJSONArray("answerOptions");
+        if (options == null || options.length() == 0) {
+            return null;
+        }
+
+        JSONArray keys = content.optJSONArray("keys");
+        if (keys != null && keys.length() > 0) {
+            String candidate = keys.optString(0, "").trim();
+            if (indexOfOptionId(options, candidate) >= 0) {
+                return candidate;
+            }
+        }
+
+        JSONArray correct = content.optJSONArray("correct_answer");
+        if (correct == null || correct.length() == 0) {
+            return null;
+        }
+        String value = correct.optString(0, "").trim();
+        if (value.isEmpty()) {
+            return null;
+        }
+        if (indexOfOptionId(options, value) >= 0) {
+            return value;
+        }
+        if (value.length() == 1) {
+            int index = Character.toUpperCase(value.charAt(0)) - 'A';
+            if (index >= 0 && index < options.length()) {
+                return options.getJSONObject(index).optString("id", null);
+            }
+        }
+        return null;
+    }
+
+    private static int indexOfOptionId(JSONArray options, String id) {
+        if (id == null || id.isEmpty()) {
+            return -1;
+        }
+        for (int i = 0; i < options.length(); i++) {
+            if (id.equals(options.getJSONObject(i).optString("id", null))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Converts a legacy entry (prompt / body / answer.choices) into the standard
+     * content shape. Returns null when the entry carries no usable answer -- legacy
+     * grid-in entries ship a rationale only, so they cannot be graded.
+     */
+    private static JSONObject normalizeLegacy(JSONObject content) {
+        JSONObject answer = content.optJSONObject("answer");
+        if (answer == null) {
+            return null;
+        }
+        JSONObject choices = answer.optJSONObject("choices");
+        String correctChoice = answer.optString("correct_choice", null);
+        if (choices == null || correctChoice == null || correctChoice.trim().isEmpty()) {
+            return null;
+        }
+
+        JSONArray options = new JSONArray();
+        for (String key : new TreeSet<>(choices.keySet())) {
+            JSONObject option = new JSONObject();
+            option.put("id", key);
+            option.put("content", choices.getJSONObject(key).optString("body", ""));
+            options.put(option);
+        }
+
+        JSONObject normalized = new JSONObject();
+        normalized.put("stem", content.optString("prompt", ""));
+        if (content.has("body") && !content.isNull("body")) {
+            normalized.put("stimulus", content.optString("body"));
+        }
+        normalized.put("type", "mcq");
+        normalized.put("answerOptions", options);
+        normalized.put("correct_answer", new JSONArray().put(correctChoice.trim()));
+        if (answer.has("rationale") && !answer.isNull("rationale")) {
+            normalized.put("rationale", answer.optString("rationale"));
+        }
+        return normalized;
     }
 
     private static String buildChoicesJson(JSONObject content, String type) {
@@ -153,6 +257,14 @@ public class ImportQuestions {
             reshaped.put(choice);
         }
         return reshaped.toString();
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private static void setNullableString(PreparedStatement ps, int index, String value) throws SQLException {

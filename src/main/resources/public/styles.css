@@ -47,6 +47,13 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
+.app-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .error-banner {
   background: var(--incorrect);
   color: #fff;
@@ -58,15 +65,36 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: 220px 1fr 280px;
+  grid-template-columns: 220px minmax(0, 1fr) 280px;
+  grid-template-areas: "filters questions review";
   gap: 16px;
   padding: 16px 24px 40px;
   align-items: start;
 }
 
+/* With a question open, the result list drops under the filters in the left
+   sidebar and the question takes the top of the main column. */
+.layout.detail-open {
+  grid-template-columns: 260px minmax(0, 1fr) 280px;
+  grid-template-areas:
+    "filters   detail review"
+    "questions detail review";
+}
+
+.filter-panel { grid-area: filters; }
+.questions-panel { grid-area: questions; }
+.detail-panel { grid-area: detail; }
+.sidebar { grid-area: review; }
+
 @media (max-width: 900px) {
-  .layout {
+  .layout,
+  .layout.detail-open {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "detail"
+      "filters"
+      "questions"
+      "review";
   }
 }
 
@@ -149,8 +177,8 @@ button:disabled {
 
 .question-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 10px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -159,7 +187,90 @@ button:disabled {
 }
 
 .question-row:last-child { border-bottom: none; }
+
+/* Section dividers inside a box's list ("Saved questions" / "Generated questions"). */
+.question-group-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-alt, rgba(127, 127, 127, 0.08));
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.question-group-empty {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  color: var(--muted);
+}
 .question-row:hover { background: rgba(47, 109, 246, 0.08); }
+.question-row.active { background: rgba(47, 109, 246, 0.16); }
+
+.question-check {
+  flex: none;
+  margin: 4px 0 0;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.question-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The list is narrow once it is in the sidebar, so let it scroll instead of
+   pushing the filters off-screen. */
+.layout.detail-open .question-list {
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+/* College Board question ID -- monospace so students can read it off exactly. */
+.cb-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.close-question {
+  flex: none;
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  line-height: 1;
+  font-size: 20px;
+  padding: 2px 10px 5px;
+}
+
+.close-question:hover {
+  color: var(--fg);
+  border-color: var(--muted);
+}
+
+.cb-id-detail {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
 
 .badge {
   font-size: 11px;
@@ -173,15 +284,14 @@ button:disabled {
   color: #1a1a1a;
 }
 
-.question-detail {
-  margin-top: 20px;
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
+.detail-panel {
+  min-width: 0;
 }
 
 .stimulus, .stem {
-  line-height: 1.7;
-  margin-bottom: 16px;
+  font-size: 21px;
+  line-height: 1.75;
+  margin-bottom: 20px;
 }
 
 .answer-form {
@@ -191,7 +301,8 @@ button:disabled {
 .answer-form input[type="text"] {
   width: 100%;
   max-width: 320px;
-  padding: 8px;
+  font-size: 20px;
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -200,22 +311,368 @@ button:disabled {
 
 .choice-option {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 8px;
-  cursor: pointer;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  font-size: 20px;
 }
 
 .choice-option:hover { background: rgba(47, 109, 246, 0.08); }
+
+.choice-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.choice-option input[type="radio"] {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.choice-letter {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 17px;
+  color: var(--muted);
+}
+
+.choice-text { min-width: 0; }
+.choice-text p { margin: 0; }
+
+/* Chrome shrinks inline <mfrac> to script size, which leaves fractions much
+   smaller than the surrounding text; math-style: normal keeps them full size. */
+.stem math,
+.stimulus math,
+.choice-text math,
+.answer-area math {
+  math-style: normal;
+}
+
+/* Part of the bank is not MathML at all: those questions ship their math and
+   their figures as PNGs of black line art on a transparent background, which
+   is invisible against the dark theme. Inverting the pixels turns the black
+   glyphs white; the paired hue-rotate puts coloured artwork back on its
+   original hue, so only lightness flips. The transparent background is
+   unaffected either way. */
+@media (prefers-color-scheme: dark) {
+  .stem img,
+  .stimulus img,
+  .choice-text img,
+  .answer-area img {
+    filter: invert(1) hue-rotate(180deg);
+  }
+}
+
+/* The bank renders these PNGs for roughly 16px body text, so at our 20-21px
+   stem and choice sizes the inline math sits noticeably smaller than the words
+   around it. zoom scales the box as well as the pixels, so the line box grows
+   with it and the baseline stays put. */
+.stem .math-img,
+.stimulus .math-img,
+.choice-text .math-img,
+.answer-area .math-img {
+  zoom: 1.25;
+}
+
+/* Figures are standalone block art, not inline with text: keep them at natural
+   size and let narrow panes shrink them instead of overflowing. */
+.stem img:not(.math-img),
+.stimulus img:not(.math-img),
+.choice-text img:not(.math-img),
+.answer-area img:not(.math-img) {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Cross-out control, as in the College Board's Bluebook app: the letter with a
+   line through it, becoming Undo once the choice has been eliminated. */
+.choice-strike {
+  flex: none;
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  min-width: 44px;
+  font-size: 15px;
+  text-decoration: line-through;
+}
+
+.choice-strike:hover {
+  color: var(--fg);
+  border-color: var(--muted);
+}
+
+.choice-option.eliminated {
+  opacity: 0.55;
+}
+
+.choice-option.eliminated .choice-body {
+  cursor: default;
+  position: relative;
+}
+
+/* A line across the whole option: text-decoration does not strike through
+   MathML, and the real test crosses out the entire choice anyway. */
+.choice-option.eliminated .choice-body::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 2px solid var(--muted);
+  pointer-events: none;
+}
+
+.choice-option.eliminated .choice-letter {
+  text-decoration: line-through;
+}
+
+.choice-option.eliminated .choice-strike {
+  text-decoration: none;
+}
 
 .detail-controls {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
   margin-bottom: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.gen-level-group {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* `display: flex` above beats the [hidden] UA rule, so restate it. */
+.gen-level-group[hidden] {
+  display: none;
+}
+
+.gen-level-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.add-to-box-wrap {
+  position: relative;
+}
+
+.add-to-box-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  margin-top: 6px;
+  min-width: 200px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  font-size: 13px;
+}
+
+.add-to-box-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  color: var(--fg);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 2px;
+}
+
+.add-to-box-menu button:hover {
+  background: rgba(47, 109, 246, 0.12);
+}
+
+.add-to-box-menu .add-to-box-new {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.add-to-box-menu .add-to-box-new input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.add-to-box-status {
+  font-size: 12px;
+  color: var(--correct);
+  padding: 4px 8px 0;
+}
+
+/* ---- Boxes overlay ---- */
+
+.boxes-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 50;
+}
+
+.boxes-overlay[hidden] {
+  display: none;
+}
+
+.boxes-panel {
+  width: 100%;
+  max-width: 780px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.boxes-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.boxes-header h2 {
+  margin: 0;
+}
+
+.boxes-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.boxes-hint {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.boxes-body .review-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.review-row.active {
+  color: var(--accent);
+  font-weight: bold;
+}
+
+.new-box-row {
+  display: flex;
+  gap: 6px;
+}
+
+.new-box-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+/* Box mode: the strip above the question list while a box is open. */
+.box-mode-bar {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(47, 109, 246, 0.06);
+}
+
+.box-mode-bar[hidden] {
+  display: none;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 13px;
+}
+
+.link-button:hover { text-decoration: underline; }
+
+.box-generate-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.box-generate-row input[type="number"] {
+  width: 60px;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.box-generate-row select {
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.box-generate-status {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 8px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
@@ -228,6 +685,7 @@ button:disabled {
 .submit-result.incorrect { color: var(--incorrect); }
 
 .answer-area {
+  font-size: 19px;
   margin-top: 12px;
   padding: 12px;
   border: 1px dashed var(--border);

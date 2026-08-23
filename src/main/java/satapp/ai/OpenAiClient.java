@@ -146,6 +146,10 @@ public class OpenAiClient {
     }
 
     public static JSONObject generate(Question seed) throws GenerationException {
+        return generate(seed, QuestionGenPrompt.LEVEL_SAME_PROCEDURE);
+    }
+
+    public static JSONObject generate(Question seed, int level) throws GenerationException {
         String key = System.getenv("OPENAI_API_KEY");
         if (key == null || key.trim().isEmpty()) {
             throw new GenerationException("OPENAI_API_KEY is not set");
@@ -153,20 +157,21 @@ public class OpenAiClient {
 
         GenerationException lastError;
         try {
-            return attempt(seed, key, false);
+            return attempt(seed, level, key, false);
         } catch (GenerationException first) {
             lastError = first;
         }
 
         try {
-            return attempt(seed, key, true);
+            return attempt(seed, level, key, true);
         } catch (GenerationException second) {
             throw second;
         }
     }
 
-    private static JSONObject attempt(Question seed, String key, boolean stricterRetry) throws GenerationException {
-        String prompt = QuestionGenPrompt.build(seed, stricterRetry);
+    private static JSONObject attempt(Question seed, int level, String key, boolean stricterRetry)
+            throws GenerationException {
+        String prompt = QuestionGenPrompt.build(seed, level, stricterRetry);
 
         JSONObject requestBody = new JSONObject();
         requestBody.put("model", model());

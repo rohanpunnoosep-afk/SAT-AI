@@ -4,6 +4,7 @@ public class Question {
 
     private String id;
     private String externalId;
+    private String cbQuestionId;
     private String section;
     private String domain;
     private String skill;
@@ -20,12 +21,13 @@ public class Question {
     public Question() {
     }
 
-    public Question(String id, String externalId, String section, String domain, String skill,
+    public Question(String id, String externalId, String cbQuestionId, String section, String domain, String skill,
                      String difficulty, String questionType, String stimulus, String stem,
                      String choicesJson, String correctAnswer, String explanation, String source,
                      String parentQuestionId) {
         this.id = id;
         this.externalId = externalId;
+        this.cbQuestionId = cbQuestionId;
         this.section = section;
         this.domain = domain;
         this.skill = skill;
@@ -54,6 +56,15 @@ public class Question {
 
     public void setExternalId(String externalId) {
         this.externalId = externalId;
+    }
+
+    /** The College Board question ID (bank field "questionId"); null for AI-generated questions. */
+    public String getCbQuestionId() {
+        return cbQuestionId;
+    }
+
+    public void setCbQuestionId(String cbQuestionId) {
+        this.cbQuestionId = cbQuestionId;
     }
 
     public String getSection() {

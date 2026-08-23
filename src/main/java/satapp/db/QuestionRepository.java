@@ -65,24 +65,25 @@ public class QuestionRepository {
 
     public void insert(Question q) throws SQLException {
         String sql = "INSERT INTO questions " +
-            "(id, external_id, section, domain, skill, difficulty, question_type, stimulus, stem, " +
+            "(id, external_id, cb_question_id, section, domain, skill, difficulty, question_type, stimulus, stem, " +
             "choices_json, correct_answer, explanation, source, parent_question_id) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, q.getId());
             setNullableString(ps, 2, q.getExternalId());
-            setNullableString(ps, 3, q.getSection());
-            setNullableString(ps, 4, q.getDomain());
-            setNullableString(ps, 5, q.getSkill());
-            setNullableString(ps, 6, q.getDifficulty());
-            setNullableString(ps, 7, q.getQuestionType());
-            setNullableString(ps, 8, q.getStimulus());
-            setNullableString(ps, 9, q.getStem());
-            setNullableString(ps, 10, q.getChoicesJson());
-            setNullableString(ps, 11, q.getCorrectAnswer());
-            setNullableString(ps, 12, q.getExplanation());
-            setNullableString(ps, 13, q.getSource());
-            setNullableString(ps, 14, q.getParentQuestionId());
+            setNullableString(ps, 3, q.getCbQuestionId());
+            setNullableString(ps, 4, q.getSection());
+            setNullableString(ps, 5, q.getDomain());
+            setNullableString(ps, 6, q.getSkill());
+            setNullableString(ps, 7, q.getDifficulty());
+            setNullableString(ps, 8, q.getQuestionType());
+            setNullableString(ps, 9, q.getStimulus());
+            setNullableString(ps, 10, q.getStem());
+            setNullableString(ps, 11, q.getChoicesJson());
+            setNullableString(ps, 12, q.getCorrectAnswer());
+            setNullableString(ps, 13, q.getExplanation());
+            setNullableString(ps, 14, q.getSource());
+            setNullableString(ps, 15, q.getParentQuestionId());
             ps.executeUpdate();
         }
     }
@@ -131,6 +132,7 @@ public class QuestionRepository {
         return new Question(
             rs.getString("id"),
             rs.getString("external_id"),
+            rs.getString("cb_question_id"),
             rs.getString("section"),
             rs.getString("domain"),
             rs.getString("skill"),
