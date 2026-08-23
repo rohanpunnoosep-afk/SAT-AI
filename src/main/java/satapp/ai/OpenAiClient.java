@@ -11,6 +11,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public class OpenAiClient {
@@ -31,6 +32,20 @@ public class OpenAiClient {
     public static String baseUrl() {
         String base = System.getenv("OPENAI_BASE_URL");
         return (base != null && !base.trim().isEmpty()) ? base.trim() : DEFAULT_BASE_URL;
+    }
+
+    public static boolean validationEnabled() {
+        String value = System.getenv("SAT_VALIDATE_ANSWERS");
+        if (value == null) {
+            return true;
+        }
+        String normalized = value.trim().toLowerCase();
+        return !(normalized.equals("off") || normalized.equals("false") || normalized.equals("0"));
+    }
+
+    public static String validatorModel() {
+        String model = System.getenv("OPENAI_VALIDATOR_MODEL");
+        return (model != null && !model.trim().isEmpty()) ? model.trim() : model();
     }
 
     public static JSONObject parseGeneratedQuestion(String rawModelText) throws GenerationException {
@@ -101,6 +116,10 @@ public class OpenAiClient {
         JSONObject result = new JSONObject();
         result.put("stem", stem);
         result.put("choices", validatedChoices);
+        String work = obj.optString("work", "").trim();
+        if (!work.isEmpty()) {
+            result.put("work", work);
+        }
         result.put("correct_answer", correctAnswer);
         result.put("explanation", explanation);
         return result;
@@ -151,26 +170,77 @@ public class OpenAiClient {
             throw new GenerationException("OPENAI_API_KEY is not set");
         }
 
-        GenerationException lastError;
-        try {
-            return attempt(seed, key, false);
-        } catch (GenerationException first) {
-            lastError = first;
+        GenerationException lastError = null;
+        for (int i = 0; i < 3; i++) {
+            boolean stricterRetry = i > 0;
+            try {
+                JSONObject generated = attempt(seed, key, stricterRetry);
+                validateOrThrow(generated, seed, key);
+                return generated;
+            } catch (GenerationException e) {
+                lastError = e;
+                System.err.println("Generation attempt " + (i + 1) + " rejected: " + e.getMessage());
+            }
         }
-
-        try {
-            return attempt(seed, key, true);
-        } catch (GenerationException second) {
-            throw second;
-        }
+        throw lastError;
     }
 
     private static JSONObject attempt(Question seed, String key, boolean stricterRetry) throws GenerationException {
         String prompt = QuestionGenPrompt.build(seed, stricterRetry);
+        String content = chatCompletion(key, model(), 0.8, prompt);
+        return parseGeneratedQuestion(content);
+    }
 
+    private static void validateOrThrow(JSONObject generated, Question seed, String key) throws GenerationException {
+        String canonicalAnswer = AnswerValidator.normalizeCorrectAnswer(generated);
+        generated.put("correct_answer", canonicalAnswer);
+
+        List<String> problems = AnswerValidator.staticChecks(generated, seed);
+        if (!problems.isEmpty()) {
+            throw new GenerationException("generated question failed validation: " + String.join("; ", problems));
+        }
+
+        if (!validationEnabled()) {
+            return;
+        }
+
+        String prompt = AnswerValidator.buildSolverPrompt(generated.getString("stem"), generated.getJSONArray("choices"));
+        String solverAnswer;
+        try {
+            String reply = chatCompletion(key, validatorModel(), 0.0, prompt);
+            solverAnswer = AnswerValidator.parseSolverAnswer(reply, generated.getJSONArray("choices"));
+        } catch (Exception e) {
+            System.err.println("Answer validator call failed, degrading to unvalidated: " + e.getMessage());
+            return;
+        }
+
+        String claimed = generated.getString("correct_answer");
+        if (AnswerValidator.agrees(solverAnswer, claimed)) {
+            return;
+        }
+
+        String secondSolverAnswer;
+        try {
+            String reply = chatCompletion(key, validatorModel(), 0.0, prompt);
+            secondSolverAnswer = AnswerValidator.parseSolverAnswer(reply, generated.getJSONArray("choices"));
+        } catch (Exception e) {
+            System.err.println("Answer validator tie-break call failed, degrading to unvalidated: " + e.getMessage());
+            return;
+        }
+
+        if (AnswerValidator.agrees(secondSolverAnswer, claimed)) {
+            return;
+        }
+
+        throw new GenerationException("answer validation failed: solver chose " + secondSolverAnswer
+            + " but question was marked " + claimed);
+    }
+
+    private static String chatCompletion(String key, String model, double temperature, String prompt)
+            throws GenerationException {
         JSONObject requestBody = new JSONObject();
-        requestBody.put("model", model());
-        requestBody.put("temperature", 0.8);
+        requestBody.put("model", model);
+        requestBody.put("temperature", temperature);
         JSONArray messages = new JSONArray();
         JSONObject userMessage = new JSONObject();
         userMessage.put("role", "user");
@@ -201,7 +271,6 @@ public class OpenAiClient {
             throw new GenerationException("OpenAI request returned status " + response.statusCode());
         }
 
-        String content = extractMessageContent(response.body());
-        return parseGeneratedQuestion(content);
+        return extractMessageContent(response.body());
     }
 }
