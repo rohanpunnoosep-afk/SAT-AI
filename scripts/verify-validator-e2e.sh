@@ -12,17 +12,30 @@ echo "Building classpath..."
 mvn -q dependency:build-classpath -Dmdep.outputFile=cp.txt
 CP="target/classes:$(cat cp.txt)"
 
+# The pipeline branches on section, so the fixtures need one seed of each kind:
+# a math seed drives the answer-first path, an english seed the choices-first one.
 SEED_ID=$(python3 -c "
 import json
 with open('src/test/resources/sample-questions.json') as f:
     data = json.load(f)
-for uid in data.keys():
-    print(uid)
-    break
+for uid, q in data.items():
+    if q.get('module') == 'math':
+        print(uid)
+        break
 ")
 
-if [ -z "$SEED_ID" ]; then
-    echo "FAIL: could not derive a fixture id"
+VERBAL_SEED_ID=$(python3 -c "
+import json
+with open('src/test/resources/sample-questions.json') as f:
+    data = json.load(f)
+for uid, q in data.items():
+    if q.get('module') != 'math':
+        print(uid)
+        break
+")
+
+if [ -z "$SEED_ID" ] || [ -z "$VERBAL_SEED_ID" ]; then
+    echo "FAIL: could not derive a math and an english fixture id"
     exit 1
 fi
 
@@ -121,9 +134,24 @@ if [ "$answer_status" != "200" ]; then
     echo "FAIL [good]: could not fetch answer for generated question, status $answer_status"
     exit 1
 fi
-GOT_ANSWER=$(python3 -c "import json; print(json.load(open('${resp_file}.ans'))['correct_answer'])")
-if [ "$GOT_ANSWER" != "B" ]; then
-    echo "FAIL [good]: expected correct_answer B, got $GOT_ANSWER"
+# The answer-first pipeline places the verified answer itself, so assert on the
+# choice text the marked id points at rather than on a fixed letter.
+MARKED_TEXT=$(python3 -c "
+import json
+answer = json.load(open('${resp_file}.ans'))['correct_answer']
+question = json.load(open('$resp_file'))
+for choice in question['choices']:
+    if choice['id'] == answer:
+        print(choice['text'])
+        break
+")
+if [ "$MARKED_TEXT" != "15" ]; then
+    echo "FAIL [good]: expected the marked choice to be 15, got '$MARKED_TEXT'"
+    exit 1
+fi
+if ! grep -q "^OPEN_SOLVER$" "$stub_log" 2>/dev/null; then
+    echo "FAIL [good]: math seed did not go through a blind open-ended solve"
+    cat "$stub_log" 2>/dev/null || true
     exit 1
 fi
 stop_scenario
@@ -178,9 +206,70 @@ if [ "$status" != "502" ]; then
     cat "$resp_file"
     exit 1
 fi
-if grep -q "^SOLVER$" "$stub_log" 2>/dev/null; then
-    echo "FAIL [dupchoices]: solver was called, but duplicate choices should be rejected before solving"
+case "$(cat "$resp_file")" in
+    *duplicate*) ;;
+    *) echo "FAIL [dupchoices]: error body did not mention the duplicate: $(cat "$resp_file")"; exit 1 ;;
+esac
+stop_scenario
+
+# ---- scenario: ambiguous (the two blind solvers disagree with each other) ----
+run_scenario "ambiguous"
+db_path="$DB_PATH_OUT"
+log_path="$LOG_PATH_OUT"
+stub_log="$STUB_LOG_OUT"
+
+before_count=$(count_questions)
+status=$(curl -sS -o "$resp_file" -w '%{http_code}' -X POST "${BASE_URL}/api/questions/${SEED_ID}/generate")
+if [ "$status" != "502" ]; then
+    echo "FAIL [ambiguous]: expected 502, got $status"
+    cat "$resp_file"
+    exit 1
+fi
+case "$(cat "$resp_file")" in
+    *disagreed*) ;;
+    *) echo "FAIL [ambiguous]: error body did not mention the disagreement: $(cat "$resp_file")"; exit 1 ;;
+esac
+after_count=$(count_questions)
+if [ "$before_count" != "$after_count" ]; then
+    echo "FAIL [ambiguous]: question count changed ($before_count -> $after_count)"
+    exit 1
+fi
+stop_scenario
+
+# ---- scenario: verbal (Reading and Writing keeps the choices-first path) ----
+run_scenario "verbal"
+db_path="$DB_PATH_OUT"
+log_path="$LOG_PATH_OUT"
+stub_log="$STUB_LOG_OUT"
+
+status=$(curl -sS -o "$resp_file" -w '%{http_code}' -X POST "${BASE_URL}/api/questions/${VERBAL_SEED_ID}/generate")
+if [ "$status" != "201" ]; then
+    echo "FAIL [verbal]: expected 201, got $status"
+    cat "$resp_file"
+    exit 1
+fi
+if grep -q "^OPEN_SOLVER$" "$stub_log" 2>/dev/null; then
+    echo "FAIL [verbal]: an english seed must not be posed open-ended"
     cat "$stub_log"
+    exit 1
+fi
+if ! grep -q "^SOLVER$" "$stub_log" 2>/dev/null; then
+    echo "FAIL [verbal]: english seed was not blind-solved with its choices"
+    cat "$stub_log" 2>/dev/null || true
+    exit 1
+fi
+stop_scenario
+
+# ---- scenario: verbal_mismarked ----
+run_scenario "verbal_mismarked"
+db_path="$DB_PATH_OUT"
+log_path="$LOG_PATH_OUT"
+stub_log="$STUB_LOG_OUT"
+
+status=$(curl -sS -o "$resp_file" -w '%{http_code}' -X POST "${BASE_URL}/api/questions/${VERBAL_SEED_ID}/generate")
+if [ "$status" != "502" ]; then
+    echo "FAIL [verbal_mismarked]: expected 502, got $status"
+    cat "$resp_file"
     exit 1
 fi
 stop_scenario

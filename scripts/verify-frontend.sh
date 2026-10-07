@@ -65,7 +65,7 @@ if [ "$styles_len" -le 1000 ]; then
 fi
 
 # c. the served /index.html body contains every required DOM id
-required_ids="filter-section filter-domain filter-skill filter-difficulty filter-search apply-filters question-list result-count question-detail answer-area submit-answer show-answer generate-similar review-list session-stats error-banner"
+required_ids="filter-section filter-domain filter-skill filter-difficulty filter-search apply-filters question-list result-count question-detail answer-area question-answer-form submit-result show-answer generate-similar review-list session-stats error-banner"
 
 missing_ids=""
 for id in $required_ids; do

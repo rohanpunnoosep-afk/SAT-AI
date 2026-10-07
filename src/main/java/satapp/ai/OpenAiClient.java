@@ -10,14 +10,38 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public class OpenAiClient {
 
-    private static final String DEFAULT_MODEL = "gpt-4o-mini";
+    // gpt-4o-mini could not reliably solve its own SAT math questions, which is what
+    // produced wrong answers and self-contradicting explanations. The pipeline below
+    // leans on the model actually being able to solve the question it just wrote.
+    private static final String DEFAULT_MODEL = "gpt-5.4-mini";
     private static final String DEFAULT_BASE_URL = "https://api.openai.com";
+
+    // gpt-5.4-mini defaults reasoning_effort to "none", so until now every call -- the
+    // writer's and both blind solvers' -- attacked Hard Advanced Math with no reasoning
+    // at all. That is the single largest cause of wrong answers here. Effort is set per
+    // role instead: the solvers are the safety net and get the most, the writer enough to
+    // construct a consistent question, the distractor call almost none since the answer
+    // is already fixed by then.
+    private static final String DEFAULT_WRITER_EFFORT = "medium";
+    private static final String DEFAULT_VALIDATOR_EFFORT = "high";
+    private static final String DEFAULT_DISTRACTOR_EFFORT = "low";
+
+    /** Effort is mutually exclusive with temperature, so "none" means "sample instead". */
+    static final String EFFORT_NONE = "none";
+
+    private static final List<String> VALID_EFFORTS =
+        List.of(EFFORT_NONE, "low", "medium", "high", "xhigh");
 
     public static boolean isConfigured() {
         String key = System.getenv("OPENAI_API_KEY");
@@ -41,6 +65,35 @@ public class OpenAiClient {
         }
         String normalized = value.trim().toLowerCase();
         return !(normalized.equals("off") || normalized.equals("false") || normalized.equals("0"));
+    }
+
+    private static final int MAX_ATTEMPTS = 3;
+
+    public static String writerEffort() {
+        return effortFromEnv("SAT_WRITER_REASONING_EFFORT", DEFAULT_WRITER_EFFORT);
+    }
+
+    public static String validatorEffort() {
+        return effortFromEnv("SAT_VALIDATOR_REASONING_EFFORT", DEFAULT_VALIDATOR_EFFORT);
+    }
+
+    public static String distractorEffort() {
+        return effortFromEnv("SAT_DISTRACTOR_REASONING_EFFORT", DEFAULT_DISTRACTOR_EFFORT);
+    }
+
+    /** Falls back to the default rather than failing the run on a typo in the env var. */
+    static String effortFromEnv(String name, String fallback) {
+        String value = System.getenv(name);
+        if (value == null || value.trim().isEmpty()) {
+            return fallback;
+        }
+        String normalized = value.trim().toLowerCase();
+        if (!VALID_EFFORTS.contains(normalized)) {
+            System.err.println(name + "=" + value + " is not one of " + VALID_EFFORTS
+                + "; using " + fallback);
+            return fallback;
+        }
+        return normalized;
     }
 
     public static String validatorModel() {
@@ -168,31 +221,241 @@ public class OpenAiClient {
         return generate(seed, QuestionGenPrompt.LEVEL_SAME_PROCEDURE);
     }
 
+    /**
+     * Produces a verified variant of {@code seed}.
+     *
+     * <p>Math questions go through an answer-first pipeline: the model writes the question
+     * open-ended (no choices), two independent blind solvers are handed just the stem, and
+     * the question is only kept when both solvers and the writer land on the same value.
+     * Only then are distractors built around the confirmed answer. Reading and Writing
+     * questions cannot be posed without their choices, so they keep the choices-first
+     * shape and are blind-solved with the choices attached.
+     */
     public static JSONObject generate(Question seed, int level) throws GenerationException {
         String key = System.getenv("OPENAI_API_KEY");
         if (key == null || key.trim().isEmpty()) {
             throw new GenerationException("OPENAI_API_KEY is not set");
         }
 
+        // "Which of the following must be an integer?" has no open-ended form: strip the
+        // choices and several different expressions are equally correct, so the two blind
+        // solvers name two of them, that reads as disagreement, and all three attempts are
+        // rejected as ambiguous. Those seeds keep the choices-first pipeline even though
+        // they are math.
+        boolean answerFirst = AnswerValidator.isMathSection(seed)
+            && !AnswerValidator.isChoiceDependent(seed);
         GenerationException lastError = null;
-        for (int i = 0; i < 3; i++) {
-            boolean stricterRetry = i > 0;
+        String priorFailure = null;
+        for (int i = 0; i < MAX_ATTEMPTS; i++) {
             try {
-                JSONObject generated = attempt(seed, level, key, stricterRetry);
+                if (answerFirst) {
+                    return generateAnswerFirst(seed, level, key, priorFailure);
+                }
+                JSONObject generated = attempt(seed, level, key, priorFailure);
                 validateOrThrow(generated, seed, key);
                 return generated;
             } catch (GenerationException e) {
                 lastError = e;
+                priorFailure = e.getMessage();
                 System.err.println("Generation attempt " + (i + 1) + " rejected: " + e.getMessage());
             }
         }
         throw lastError;
     }
 
-    private static JSONObject attempt(Question seed, int level, String key, boolean stricterRetry)
+    // ---------------------------------------------------------------- answer-first (math)
+
+    private static JSONObject generateAnswerFirst(Question seed, int level, String key,
+                                                  String priorFailure) throws GenerationException {
+        String prompt = QuestionGenPrompt.buildOpenEnded(seed, level, priorFailure);
+        JSONObject open = parseOpenEndedQuestion(
+            chatCompletion(key, model(), writerEffort(), 0.8, prompt));
+
+        String stem = open.getString("stem");
+        String claimed = open.getString("answer");
+
+        if (AnswerValidator.plainText(stem).equalsIgnoreCase(AnswerValidator.plainText(seed.getStem()))) {
+            throw new GenerationException("generated stem is identical to the seed stem");
+        }
+
+        String verified = blindSolveOpen(stem, claimed, key);
+
+        JSONObject result = new JSONObject();
+        result.put("stem", stem);
+        result.put("work", open.optString("work", ""));
+        result.put("explanation", open.getString("explanation"));
+
+        if ("spr".equalsIgnoreCase(seed.getQuestionType())) {
+            // Student-produced response: the verified value is the answer, no choices needed.
+            result.put("question_type", "spr");
+            result.put("choices", new JSONArray());
+            result.put("correct_answer", verified);
+            result.put("explanation", withAnswerLine(result.getString("explanation"), null, verified));
+            rejectIfProblems(result, seed);
+            return result;
+        }
+
+        JSONArray choices = buildChoices(stem, verified, key);
+        String correctId = AnswerValidator.idOfChoiceText(choices, verified);
+        result.put("question_type", "mcq");
+        result.put("choices", choices);
+        result.put("correct_answer", correctId);
+        result.put("explanation", withAnswerLine(result.getString("explanation"), correctId, verified));
+
+        rejectIfProblems(result, seed);
+        return result;
+    }
+
+    private static void rejectIfProblems(JSONObject generated, Question seed) throws GenerationException {
+        // Only the answer-first walkthrough is checked for this: it is a pure solution
+        // narrative, so "no such pair exists" there can only mean the stem is broken. A
+        // choices-first explanation says the same words legitimately when ruling out a
+        // distractor.
+        String contradiction = AnswerValidator.selfContradiction(generated.optString("explanation", ""));
+        if (contradiction != null) {
+            throw new GenerationException("the explanation contradicts its own question (\""
+                + contradiction + "\"), so the stem states a condition nothing satisfies");
+        }
+
+        List<String> problems = AnswerValidator.staticChecks(generated, seed);
+        if (!problems.isEmpty()) {
+            throw new GenerationException("generated question failed validation: "
+                + String.join("; ", problems));
+        }
+    }
+
+    /**
+     * Hands the bare stem to two independent solvers and requires all three answers -- both
+     * solvers and the writer's own -- to agree before the question is trusted. With no
+     * choices in front of it a solver cannot pattern-match its way to the marked answer, so
+     * agreement here is real evidence rather than an echo.
+     */
+    private static String blindSolveOpen(String stem, String claimed, String key)
             throws GenerationException {
-        String prompt = QuestionGenPrompt.build(seed, level, stricterRetry);
-        String content = chatCompletion(key, model(), 0.8, prompt);
+        String prompt = AnswerValidator.buildOpenSolverPrompt(stem);
+        String effort = validatorEffort();
+        // With reasoning on, temperature is not accepted, so the two solvers are separated
+        // by ordinary sampling variation rather than by a temperature spread. That is a
+        // stronger independence check than it sounds: a question only survives when two
+        // full reasoning passes land on the same value.
+        List<String> replies = inParallel(
+            () -> chatCompletion(key, validatorModel(), effort, 0.0, prompt),
+            () -> chatCompletion(key, validatorModel(), effort, 0.3, prompt));
+
+        if (!validationEnabled()) {
+            return claimed;
+        }
+        if (replies.size() < 2) {
+            System.err.println("Answer validator call failed, degrading to unvalidated");
+            return claimed;
+        }
+
+        String first = AnswerValidator.parseOpenSolverAnswer(replies.get(0));
+        String second = AnswerValidator.parseOpenSolverAnswer(replies.get(1));
+
+        // A solver that reports the stem unsolvable is the only signal that catches a
+        // question whose conditions contradict each other. Both solvers "repairing" the
+        // same broken stem otherwise looks exactly like agreement.
+        if (AnswerValidator.isInconsistent(first) || AnswerValidator.isInconsistent(second)) {
+            throw new GenerationException("a blind solver reported the question as written is "
+                + "unsolvable or ambiguous, so the stem contradicts itself");
+        }
+        if (!AnswerValidator.answersMatch(first, second)) {
+            throw new GenerationException("the two blind solvers disagreed (" + first + " vs "
+                + second + "), so the question is ambiguous");
+        }
+        if (!AnswerValidator.answersMatch(first, claimed)) {
+            throw new GenerationException("answer validation failed: blind solvers got " + first
+                + " but the question was written with answer " + claimed);
+        }
+        // Keep the writer's spelling of the answer; it matches the explanation's wording.
+        return claimed;
+    }
+
+    private static JSONArray buildChoices(String stem, String answer, String key)
+            throws GenerationException {
+        String prompt = QuestionGenPrompt.buildDistractors(stem, answer);
+        String content = chatCompletion(key, model(), distractorEffort(), 0.7, prompt);
+        JSONObject obj;
+        try {
+            obj = new JSONObject(stripCodeFence(content.trim()));
+        } catch (JSONException e) {
+            throw new GenerationException("distractor reply was not parseable JSON object");
+        }
+        JSONArray arr = obj.optJSONArray("distractors");
+        if (arr == null || arr.length() < 3) {
+            throw new GenerationException("distractor reply did not contain 3 distractors");
+        }
+        List<String> distractors = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            String text = arr.optString(i, "").trim();
+            if (text.isEmpty() || AnswerValidator.containsMarkup(text)) {
+                throw new GenerationException("distractor was blank or contained markup");
+            }
+            distractors.add(text);
+        }
+        return AnswerValidator.assembleChoices(answer, distractors);
+    }
+
+    /** Makes the explanation state the verified answer, so it can never contradict it. */
+    private static String withAnswerLine(String explanation, String choiceId, String answer) {
+        String suffix = choiceId == null
+            ? "\n\nAnswer: " + answer
+            : "\n\nAnswer: " + choiceId + " (" + answer + ")";
+        return explanation.trim() + suffix;
+    }
+
+    static JSONObject parseOpenEndedQuestion(String rawModelText) throws GenerationException {
+        if (rawModelText == null) {
+            throw new GenerationException("Model reply was empty");
+        }
+        JSONObject obj;
+        try {
+            obj = new JSONObject(stripCodeFence(rawModelText.trim()));
+        } catch (JSONException e) {
+            throw new GenerationException("Model reply was not parseable JSON object");
+        }
+        JSONObject result = new JSONObject();
+        for (String field : new String[]{"stem", "answer", "explanation"}) {
+            String value = obj.optString(field, "").trim();
+            if (value.isEmpty()) {
+                throw new GenerationException("Model reply missing non-blank " + field);
+            }
+            if (AnswerValidator.containsMarkup(value)) {
+                throw new GenerationException("Model reply contained markup in " + field);
+            }
+            result.put(field, value);
+        }
+        result.put("work", obj.optString("work", "").trim());
+        return result;
+    }
+
+    /** Runs the calls concurrently; returns only the ones that succeeded, in order. */
+    private static List<String> inParallel(Callable<String> first, Callable<String> second) {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<String> a = pool.submit(first);
+            Future<String> b = pool.submit(second);
+            List<String> results = new ArrayList<>();
+            for (Future<String> future : List.of(a, b)) {
+                try {
+                    results.add(future.get());
+                } catch (Exception e) {
+                    System.err.println("Validator call failed: " + e.getMessage());
+                }
+            }
+            return results;
+        } finally {
+            pool.shutdown();
+        }
+    }
+
+    // ------------------------------------------------------- choices-first (reading/writing)
+
+    private static JSONObject attempt(Question seed, int level, String key, String priorFailure)
+            throws GenerationException {
+        String prompt = QuestionGenPrompt.build(seed, level, priorFailure);
+        String content = chatCompletion(key, model(), writerEffort(), 0.8, prompt);
         return parseGeneratedQuestion(content);
     }
 
@@ -209,43 +472,47 @@ public class OpenAiClient {
             return;
         }
 
-        String prompt = AnswerValidator.buildSolverPrompt(generated.getString("stem"), generated.getJSONArray("choices"));
-        String solverAnswer;
-        try {
-            String reply = chatCompletion(key, validatorModel(), 0.0, prompt);
-            solverAnswer = AnswerValidator.parseSolverAnswer(reply, generated.getJSONArray("choices"));
-        } catch (Exception e) {
-            System.err.println("Answer validator call failed, degrading to unvalidated: " + e.getMessage());
+        JSONArray choices = generated.getJSONArray("choices");
+        String prompt = AnswerValidator.buildSolverPrompt(generated.getString("stem"), choices);
+        String effort = validatorEffort();
+        List<String> replies = inParallel(
+            () -> chatCompletion(key, validatorModel(), effort, 0.0, prompt),
+            () -> chatCompletion(key, validatorModel(), effort, 0.3, prompt));
+        if (replies.size() < 2) {
+            System.err.println("Answer validator call failed, degrading to unvalidated");
             return;
         }
 
         String claimed = generated.getString("correct_answer");
-        if (AnswerValidator.agrees(solverAnswer, claimed)) {
+        String first = AnswerValidator.parseSolverAnswer(replies.get(0), choices);
+        String second = AnswerValidator.parseSolverAnswer(replies.get(1), choices);
+
+        if (AnswerValidator.isInconsistent(first) || AnswerValidator.isInconsistent(second)) {
+            throw new GenerationException("a blind solver reported the question as written has no "
+                + "single defensible choice, so the question is broken or ambiguous");
+        }
+        if (AnswerValidator.agrees(first, claimed) && AnswerValidator.agrees(second, claimed)) {
             return;
         }
-
-        String secondSolverAnswer;
-        try {
-            String reply = chatCompletion(key, validatorModel(), 0.0, prompt);
-            secondSolverAnswer = AnswerValidator.parseSolverAnswer(reply, generated.getJSONArray("choices"));
-        } catch (Exception e) {
-            System.err.println("Answer validator tie-break call failed, degrading to unvalidated: " + e.getMessage());
-            return;
-        }
-
-        if (AnswerValidator.agrees(secondSolverAnswer, claimed)) {
-            return;
-        }
-
-        throw new GenerationException("answer validation failed: solver chose " + secondSolverAnswer
-            + " but question was marked " + claimed);
+        throw new GenerationException("answer validation failed: blind solvers chose " + first
+            + "/" + second + " but the question was marked " + claimed);
     }
 
-    private static String chatCompletion(String key, String model, double temperature, String prompt)
+    /**
+     * One chat-completions call. {@code effort} and {@code temperature} are mutually
+     * exclusive on the GPT-5.x models: the API rejects temperature whenever
+     * reasoning_effort is anything but "none", so exactly one of the two is sent.
+     */
+    private static String chatCompletion(String key, String model, String effort,
+                                         double temperature, String prompt)
             throws GenerationException {
         JSONObject requestBody = new JSONObject();
         requestBody.put("model", model);
-        requestBody.put("temperature", temperature);
+        if (effort == null || EFFORT_NONE.equals(effort)) {
+            requestBody.put("temperature", temperature);
+        } else {
+            requestBody.put("reasoning_effort", effort);
+        }
         JSONArray messages = new JSONArray();
         JSONObject userMessage = new JSONObject();
         userMessage.put("role", "user");

@@ -417,10 +417,21 @@ async function revealAnswer() {
     const answer = await api("/api/questions/" + encodeURIComponent(question.id) + "/answer");
     setContentHtml(answerArea,
       "<div class=\"correct-answer\"><strong>Answer:</strong> " + escapeHtml(answer.correct_answer) + "</div>" +
-      "<div class=\"explanation\">" + (answer.explanation || "") + "</div>");
+      "<div class=\"explanation\">" + explanationHtml(answer.explanation) + "</div>");
   } catch (e) {
     showError("Could not load answer: " + e.message);
   }
+}
+
+/**
+ * Official explanations arrive as College Board markup and render as-is. AI-generated
+ * ones are plain text now, so their line breaks would otherwise collapse into one
+ * run-on paragraph -- escape those and keep the breaks.
+ */
+function explanationHtml(explanation) {
+  const text = explanation || "";
+  if (/<[a-z][\s\S]*>/i.test(text)) return text;
+  return escapeHtml(text).replace(/\n/g, "<br>");
 }
 
 function escapeHtml(str) {

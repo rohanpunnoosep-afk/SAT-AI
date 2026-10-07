@@ -477,10 +477,14 @@ public class WebServer {
         newQuestion.setDomain(seed.getDomain());
         newQuestion.setSkill(seed.getSkill());
         newQuestion.setDifficulty(seed.getDifficulty());
-        newQuestion.setQuestionType("mcq");
+        // The answer-first pipeline keeps a student-produced-response seed as spr, where
+        // the verified value itself is the answer and there are no choices to store.
+        String type = generated.optString("question_type", "mcq");
+        newQuestion.setQuestionType(type);
         newQuestion.setStimulus(null);
         newQuestion.setStem(generated.getString("stem"));
-        newQuestion.setChoicesJson(generated.getJSONArray("choices").toString());
+        newQuestion.setChoicesJson("spr".equals(type)
+            ? null : generated.getJSONArray("choices").toString());
         newQuestion.setCorrectAnswer(generated.getString("correct_answer"));
         newQuestion.setExplanation(generated.getString("explanation"));
         newQuestion.setSource("ai_generated");

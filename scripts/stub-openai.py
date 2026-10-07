@@ -3,70 +3,118 @@
 
 Usage: stub-openai.py <port> <scenario> <logfile>
 
-Serves POST /v1/chat/completions on localhost only. Inspects the request's
-user-message content to decide whether it is a generator prompt (asks the
-model to write a new question) or a solver prompt (built by
-AnswerValidator.buildSolverPrompt, always instructs the model to end its
-reply with "FINAL: <choice id>"), and replies with a scenario-specific
-fixture. Every request is logged (GENERATOR or SOLVER) to <logfile>.
+Serves POST /v1/chat/completions on localhost only. It inspects the request's
+user-message content to work out which step of the generation pipeline is
+calling, and replies with a scenario-specific fixture. Every request is logged
+by kind to <logfile>.
+
+The pipeline has two shapes:
+
+  Math (answer-first)  OPEN_GENERATOR -> OPEN_SOLVER x2 -> DISTRACTORS
+  Reading and Writing  GENERATOR      -> SOLVER x2
 """
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Markers taken verbatim from the prompt builders.
+OPEN_SOLVER_MARKER = "FINAL: <your answer>"
 SOLVER_MARKER = "FINAL: <choice id>"
+DISTRACTOR_MARKER = '{"distractors"'
+OPEN_GENERATOR_MARKER = '"answer": "..."'
 
 SCENARIOS = {
+    # Writer and both blind solvers agree; distractors are clean.
     "good": {
-        "generator": {
+        "open_generator": {
             "stem": "What is 7 + 8?",
-            "choices": [
-                {"id": "A", "text": "14"},
-                {"id": "B", "text": "15"},
-                {"id": "C", "text": "16"},
-                {"id": "D", "text": "17"},
-            ],
             "work": "7 + 8 = 15",
-            "correct_answer": "B",
-            "explanation": "Adding 7 and 8 gives 15, which is choice B.",
+            "answer": "15",
+            "explanation": "Adding 7 and 8 gives 15.",
         },
-        "solver_final": "B",
+        "open_solver_finals": ["15", "15"],
+        "distractors": ["14", "16", "17"],
     },
+    # The writer marks 13 but an independent solve of the bare stem gives 15.
     "mismarked": {
-        "generator": {
+        "open_generator": {
             "stem": "What is 9 + 5?",
-            "choices": [
-                {"id": "A", "text": "13"},
-                {"id": "B", "text": "14"},
-                {"id": "C", "text": "15"},
-                {"id": "D", "text": "16"},
-            ],
             "work": "9 + 5 = 13",
-            "correct_answer": "A",
-            "explanation": "9 plus 5 gives 13, so the answer is A.",
+            "answer": "13",
+            "explanation": "9 plus 5 gives 13.",
         },
-        "solver_final": "C",
+        "open_solver_finals": ["14", "14"],
+        "distractors": ["12", "15", "16"],
     },
-    "dupchoices": {
-        "generator": {
-            "stem": "What is 4 x 3?",
-            "choices": [
-                {"id": "A", "text": "11"},
-                {"id": "B", "text": "12"},
-                {"id": "C", "text": "12"},
-                {"id": "D", "text": "13"},
-            ],
-            "work": "4 x 3 = 12",
-            "correct_answer": "B",
-            "explanation": "4 times 3 equals 12, so the answer is B.",
+    # The two blind solvers do not even agree with each other: the question is
+    # ambiguous and must be thrown away rather than shipped.
+    "ambiguous": {
+        "open_generator": {
+            "stem": "A number is doubled. What is it?",
+            "work": "unclear",
+            "answer": "8",
+            "explanation": "Doubling gives 8.",
         },
-        "solver_final": "B",
+        "open_solver_finals": ["8", "12"],
+        "distractors": ["6", "10", "12"],
+    },
+    # A distractor repeats the verified answer, so the choice set is unusable.
+    "dupchoices": {
+        "open_generator": {
+            "stem": "What is 4 x 3?",
+            "work": "4 x 3 = 12",
+            "answer": "12",
+            "explanation": "4 times 3 equals 12.",
+        },
+        "open_solver_finals": ["12", "12"],
+        "distractors": ["11", "12", "13"],
+    },
+    # Reading and Writing keeps the choices-first shape; here the solvers agree
+    # with the marked choice.
+    "verbal": {
+        "generator": {
+            "stem": "Which word best completes the text?",
+            "choices": [
+                {"id": "A", "text": "reluctant"},
+                {"id": "B", "text": "eager"},
+                {"id": "C", "text": "hostile"},
+                {"id": "D", "text": "puzzled"},
+            ],
+            "work": "The text describes enthusiasm, so B fits.",
+            "correct_answer": "B",
+            "explanation": "The text describes enthusiasm, so eager (B) fits.",
+        },
+        "solver_finals": ["B", "B"],
+    },
+    # Reading and Writing where the blind solvers reject the marked choice.
+    "verbal_mismarked": {
+        "generator": {
+            "stem": "Which word best completes the text?",
+            "choices": [
+                {"id": "A", "text": "reluctant"},
+                {"id": "B", "text": "eager"},
+                {"id": "C", "text": "hostile"},
+                {"id": "D", "text": "puzzled"},
+            ],
+            "work": "The text describes enthusiasm.",
+            "correct_answer": "A",
+            "explanation": "The text describes enthusiasm, so reluctant (A) fits.",
+        },
+        "solver_finals": ["B", "B"],
     },
 }
 
 
 def make_handler(scenario_name, log_path):
     scenario = SCENARIOS[scenario_name]
+    # The two blind solves run concurrently, so hand out the configured replies
+    # in turn rather than assuming a fixed order per attempt.
+    counters = {"open_solver": 0, "solver": 0}
+
+    def next_final(key, values):
+        value = values[counters[key] % len(values)]
+        counters[key] += 1
+        return value
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -100,14 +148,27 @@ def make_handler(scenario_name, log_path):
             except Exception:
                 content = ""
 
-            if SOLVER_MARKER in content:
+            if OPEN_SOLVER_MARKER in content:
+                kind = "OPEN_SOLVER"
+                final = next_final("open_solver", scenario["open_solver_finals"])
+                payload = (
+                    "Working through the question step by step from scratch.\n"
+                    f"FINAL: {final}\n"
+                )
+            elif SOLVER_MARKER in content:
                 kind = "SOLVER"
-                final_id = scenario["solver_final"]
+                final = next_final("solver", scenario["solver_finals"])
                 payload = (
                     "Working through the question step by step, the reasoning "
                     "leads to a single option.\n"
-                    f"FINAL: {final_id}\n"
+                    f"FINAL: {final}\n"
                 )
+            elif DISTRACTOR_MARKER in content:
+                kind = "DISTRACTORS"
+                payload = json.dumps({"distractors": scenario["distractors"]})
+            elif OPEN_GENERATOR_MARKER in content:
+                kind = "OPEN_GENERATOR"
+                payload = json.dumps(scenario["open_generator"])
             else:
                 kind = "GENERATOR"
                 payload = json.dumps(scenario["generator"])
