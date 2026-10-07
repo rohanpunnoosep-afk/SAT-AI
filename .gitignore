@@ -47,3 +47,12 @@ tasks/
 # cb-digital-questions.json (~25 MB). Source data lives OUTSIDE this repo.
 /data/
 vendor/sat-question-bank/
+
+# --- AI-assisted workflow files (kept locally, never pushed) --------------
+CLAUDE.md
+.claude/
+run-runner.sh
+ChangeLog.csv
+ChangeHistory.md
+CoreInfrastructure.md
+PromptDocuments/

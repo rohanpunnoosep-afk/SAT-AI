@@ -116,10 +116,3 @@ java -cp "target/classes:$(cat cp.txt)" satapp.web.WebServer
 `scripts/stub-openai.py`, a fake OpenAI server, to prove that a mis-keyed
 generated question is rejected. None of these scripts need a real API key.
 
-## AI-assisted workflow
-
-- `CLAUDE.md` — rules every agent (interactive or autonomous) must follow.
-- `tasks/` — the task queue, kept in its own private git repo (gitignored here).
-- `./run-runner.sh` — starts the autonomous runner against this repo.
-- `/save-task` and `/debrief` — Claude Code skills for queueing work and reviewing overnight runs.
-- `ChangeLog.csv` — one row per change.
