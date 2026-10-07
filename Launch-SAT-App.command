@@ -10,6 +10,15 @@ cd "$(dirname "$0")"
 # Maven and java are often not on the PATH that Finder hands to a .command file.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+# Load local secrets (OPENAI_API_KEY, etc.) from the gitignored .env, if present.
+# Copy .env.example to .env and fill it in; .env is never committed.
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+fi
+
 if ! command -v mvn >/dev/null 2>&1; then
     echo "ERROR: 'mvn' not found. Install Maven (brew install maven) and try again."
     echo "Press Enter to close."
